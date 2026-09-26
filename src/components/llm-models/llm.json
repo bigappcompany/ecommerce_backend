@@ -1,0 +1,29 @@
+{
+    "providers": {
+      "OPENAI": {
+        "name": "openai",
+        "models": ["gpt-4", "gpt-3.5-turbo"]
+      },
+      "ANTHROPIC": {
+        "name": "anthropic",
+        "models": ["claude-v1", "claude-v2"]
+      },
+      "COHERE": {
+        "name": "cohere",
+        "models": ["command", "command-nightly"]
+      },
+      "HUGGINGFACE": {
+        "name": "huggingface",
+        "models": ["gpt2", "flan-t5-large"]
+      },
+      "GOOGLE": {
+        "name": "google",
+        "models": ["gemini-pro", "gemini-ultra"]
+      },
+      "DEEPSEEK": {
+        "name": "deepseek",
+        "models": ["deepseek-chat", "deepseek-coder"]
+      }
+    }
+  }
+  
