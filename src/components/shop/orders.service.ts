@@ -12,6 +12,7 @@ import { ShopOrder } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { CartService } from './cart.service';
 import { Product } from './entities/product.entity';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class OrdersService {
@@ -22,6 +23,8 @@ export class OrdersService {
     private readonly orderItems: Repository<OrderItem>,
     @InjectRepository(Product)
     private readonly products: Repository<Product>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly cartService: CartService,
     private readonly configService: ConfigService,
   ) {}
@@ -182,7 +185,99 @@ export class OrdersService {
       relations: ['items'],
       order: { created_at: 'DESC' },
     });
-    return orders;
+    return this.attachCustomers(orders);
+  }
+
+  async findByEmail(email: string) {
+    const normalized = email.trim().toLowerCase();
+    const user = await this.users
+      .createQueryBuilder('user')
+      .select([
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name',
+        'user.phone_number',
+      ])
+      .where('LOWER(user.email) = :email', { email: normalized })
+      .getOne();
+    if (!user) {
+      throw new NotFoundException('Customer not found');
+    }
+    const orders = await this.orders.find({
+      where: { user_id: user.id },
+      relations: ['items'],
+      order: { created_at: 'DESC' },
+    });
+    return {
+      customer: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        phone_number: user.phone_number,
+      },
+      orders: orders.map((order) => this.presentOrder(order, user.email, user.first_name, user.last_name)),
+    };
+  }
+
+  private async attachCustomers(orders: ShopOrder[]) {
+    const ids = [...new Set(orders.map((order) => order.user_id).filter(Boolean))];
+    const users = ids.length
+      ? await this.users
+          .createQueryBuilder('user')
+          .select([
+            'user.id',
+            'user.email',
+            'user.first_name',
+            'user.last_name',
+          ])
+          .where('user.id IN (:...ids)', { ids })
+          .getMany()
+      : [];
+    const byId = new Map(users.map((user) => [user.id, user]));
+    return orders.map((order) => {
+      const customer = byId.get(order.user_id);
+      return this.presentOrder(
+        order,
+        customer?.email,
+        customer?.first_name,
+        customer?.last_name,
+      );
+    });
+  }
+
+  private presentOrder(
+    order: ShopOrder,
+    email?: string,
+    firstName?: string,
+    lastName?: string,
+  ) {
+    return {
+      id: order.id,
+      user_id: order.user_id,
+      status: order.status,
+      total: order.total,
+      shipping_name: order.shipping_name,
+      phone: order.phone,
+      address: order.address,
+      city: order.city,
+      pincode: order.pincode,
+      razorpay_order_id: order.razorpay_order_id,
+      razorpay_payment_id: order.razorpay_payment_id,
+      created_at: order.created_at,
+      updated_at: order.updated_at,
+      customer_email: email || null,
+      customer_name: `${firstName || ''} ${lastName || ''}`.trim() || null,
+      items: (order.items || []).map((item) => ({
+        id: item.id,
+        product_id: item.product_id,
+        name: item.name,
+        image_url: item.image_url,
+        price: item.price,
+        quantity: item.quantity,
+      })),
+    };
   }
 
   async updateStatus(id: string, status: string) {

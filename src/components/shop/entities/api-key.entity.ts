@@ -20,6 +20,9 @@ export class ApiCredential {
   @Column({ select: false })
   key_hash: string;
 
+  @Column({ type: 'varchar', nullable: true, select: false })
+  token: string;
+
   @Column({ type: 'simple-array' })
   scopes: string[];
 

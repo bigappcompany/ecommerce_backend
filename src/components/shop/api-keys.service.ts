@@ -22,11 +22,16 @@ export class ApiKeysService {
   }
 
   async list() {
-    const keys = await this.keys.find({ order: { created_at: 'DESC' } });
+    const keys = await this.keys
+      .createQueryBuilder('key')
+      .addSelect('key.token')
+      .orderBy('key.created_at', 'DESC')
+      .getMany();
     return keys.map((key) => ({
       id: key.id,
       name: key.name,
       prefix: key.prefix,
+      api_key: key.token || null,
       scopes: key.scopes,
       is_active: key.is_active,
       last_used_at: key.last_used_at,
@@ -45,6 +50,7 @@ export class ApiKeysService {
         name,
         prefix: raw.slice(0, 10),
         key_hash: this.hash(raw),
+        token: raw,
         scopes: selected,
         is_active: true,
       }),

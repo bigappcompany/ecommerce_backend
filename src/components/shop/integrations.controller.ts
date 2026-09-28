@@ -1,10 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { ApiScopes } from 'src/common/decorators/api-scopes.decorator';
 import { ApiKeyGuard } from './api-key.guard';
 import { CartService } from './cart.service';
 import { OrdersService } from './orders.service';
+import { ListOrdersQuery } from './dto/list-orders.query';
+import { ListProductsQuery } from './dto/list-products.query';
 import { ProductsService } from './products.service';
 
 @ApiTags('Integrations')
@@ -75,10 +77,8 @@ export class IntegrationsController {
   }
 
   @Get('products')
-  @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'category', required: false })
-  list(@Query('search') search?: string, @Query('category') category?: string) {
-    return this.productsService.list({ search, category });
+  list(@Query() query: ListProductsQuery) {
+    return this.productsService.list(query);
   }
 
   @Get('products/:id')
@@ -106,7 +106,10 @@ export class IntegrationsController {
 
   @Get('orders')
   @ApiScopes('orders:read')
-  orders() {
+  orders(@Query() query: ListOrdersQuery) {
+    if (query.email?.trim()) {
+      return this.ordersService.findByEmail(query.email);
+    }
     return this.ordersService.findAll();
   }
 

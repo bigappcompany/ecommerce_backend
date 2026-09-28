@@ -9,11 +9,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { JwtAccessTokenGuard } from '../auth/passport/jwt-access.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { OptionalApiKeyGuard } from './api-key.guard';
+import { ListProductsQuery } from './dto/list-products.query';
 import { ProductsService } from './products.service';
 
 @ApiTags('Products')
@@ -23,19 +24,17 @@ export class ProductsController {
 
   @Get()
   @ApiSecurity('api-key')
-  @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'category', required: false })
   @UseGuards(OptionalApiKeyGuard)
-  list(@Query('search') search?: string, @Query('category') category?: string) {
-    return this.productsService.list({ search, category });
+  list(@Query() query: ListProductsQuery) {
+    return this.productsService.list(query);
   }
 
   @Get('inventory')
   @ApiBearerAuth()
   @UseGuards(JwtAccessTokenGuard, RolesGuard)
   @Roles('admin')
-  manage(@Query('search') search?: string, @Query('category') category?: string) {
-    return this.productsService.list({ search, category, includeInactive: true });
+  manage(@Query() query: ListProductsQuery) {
+    return this.productsService.list({ ...query, includeInactive: true });
   }
 
   @Get(':id')
