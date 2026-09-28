@@ -18,7 +18,8 @@ export class ApiKeyGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const raw = request.headers['x-api-key'];
+    const header = request.headers['x-api-key'];
+    const raw = Array.isArray(header) ? header[0] : header;
     if (!raw || typeof raw !== 'string') {
       throw new UnauthorizedException('Send your API key in the x-api-key header');
     }
@@ -32,6 +33,30 @@ export class ApiKeyGuard implements CanActivate {
     if (missing.length) {
       throw new ForbiddenException(`API key is missing scope: ${missing.join(', ')}`);
     }
+    request.apiKey = {
+      id: record.id,
+      name: record.name,
+      scopes: record.scopes,
+    };
+    return true;
+  }
+}
+
+@Injectable()
+export class OptionalApiKeyGuard implements CanActivate {
+  constructor(private readonly apiKeysService: ApiKeysService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const header = request.headers['x-api-key'];
+    const raw = Array.isArray(header) ? header[0] : header;
+    if (raw == null || raw === '') {
+      return true;
+    }
+    if (typeof raw !== 'string') {
+      throw new UnauthorizedException('Send your API key in the x-api-key header');
+    }
+    const record = await this.apiKeysService.validate(raw);
     request.apiKey = {
       id: record.id,
       name: record.name,

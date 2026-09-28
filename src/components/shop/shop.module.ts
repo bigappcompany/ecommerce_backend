@@ -16,7 +16,7 @@ import { OrdersController } from './orders.controller';
 import { ApiKeysService } from './api-keys.service';
 import { ApiKeysController } from './api-keys.controller';
 import { IntegrationsController } from './integrations.controller';
-import { ApiKeyGuard } from './api-key.guard';
+import { ApiKeyGuard, OptionalApiKeyGuard } from './api-key.guard';
 import { ShopSeedService } from './shop-seed.service';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 
@@ -45,6 +45,7 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
     OrdersService,
     ApiKeysService,
     ApiKeyGuard,
+    OptionalApiKeyGuard,
     ShopSeedService,
     RolesGuard,
   ],

@@ -29,13 +29,13 @@ export class ProductsService {
     if (!query.includeInactive) {
       qb.where('product.is_active = :active', { active: true });
     }
-    if (query.category) {
-      qb.andWhere('product.category = :category', { category: query.category });
+    if (query.category?.trim()) {
+      qb.andWhere('product.category = :category', { category: query.category.trim() });
     }
-    if (query.search) {
+    if (query.search?.trim()) {
       qb.andWhere(
         '(product.name ILIKE :search OR product.description ILIKE :search OR product.sku ILIKE :search)',
-        { search: `%${query.search}%` },
+        { search: `%${query.search.trim()}%` },
       );
     }
     qb.orderBy('product.created_at', 'DESC');

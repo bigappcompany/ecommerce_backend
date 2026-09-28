@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { ApiScopes } from 'src/common/decorators/api-scopes.decorator';
 import { ApiKeyGuard } from './api-key.guard';
@@ -75,9 +75,15 @@ export class IntegrationsController {
   }
 
   @Get('products')
-  @ApiScopes('products:read')
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'category', required: false })
   list(@Query('search') search?: string, @Query('category') category?: string) {
-    return this.productsService.list({ search, category, includeInactive: true });
+    return this.productsService.list({ search, category });
+  }
+
+  @Get('products/:id')
+  one(@Param('id') id: string) {
+    return this.productsService.findOne(id);
   }
 
   @Post('products')
