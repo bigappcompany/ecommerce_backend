@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
-import { MANUAL_STATUSES } from '../order-journey';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { MANUAL_STATUSES, REFUND_STATUSES } from '../order-journey';
 
 export class UpdateOrderStatusDto {
   @ApiProperty({
@@ -50,15 +50,91 @@ export class UpdateOrderStatusDto {
   force?: boolean;
 }
 
+export class CancelItemDto {
+  @ApiProperty({ description: 'Order item id' })
+  @IsString()
+  item_id: string;
+
+  @ApiProperty({ example: 1, description: 'How many units of this item to cancel. Cannot exceed the quantity still active.' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  quantity: number;
+}
+
 export class CancelOrderDto {
   @ApiProperty({
     example: 'Ordered the wrong size',
-    description: 'Allowed only while the order is placed, received, or packed. Blocked after it ships.',
+    description: 'Allowed only while the order is placed, received, or packed. Blocked after it ships. Admins can cancel some units until delivery.',
   })
   @IsString()
   @MinLength(3)
   @MaxLength(500)
   reason: string;
+
+  @ApiPropertyOptional({
+    type: [CancelItemDto],
+    description: 'Omit to cancel the whole order. Send items to cancel only some units, for example 1 of 3.',
+    example: [{ item_id: 'item-uuid', quantity: 1 }],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CancelItemDto)
+  items?: CancelItemDto[];
+}
+
+export class UpdateAddressDto {
+  @ApiProperty({ example: 'Alex Shopper' })
+  @IsString()
+  @MaxLength(120)
+  shipping_name: string;
+
+  @ApiProperty({ example: '9876543210' })
+  @IsString()
+  @MaxLength(20)
+  phone: string;
+
+  @ApiProperty({ example: '44 Residency Road' })
+  @IsString()
+  @MaxLength(500)
+  address: string;
+
+  @ApiPropertyOptional({ example: 'Bengaluru' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  city?: string;
+
+  @ApiPropertyOptional({ example: '560001' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  pincode?: string;
+}
+
+export class UpdateRefundStatusDto {
+  @ApiProperty({
+    enum: REFUND_STATUSES,
+    example: 'not_received',
+    description:
+      'Admin only. Use not_received when the customer says the money has not arrived. refunded marks it received. failed or initiated lets the refund be sent again.',
+  })
+  @IsString()
+  @IsIn([...REFUND_STATUSES])
+  status: string;
+
+  @ApiPropertyOptional({ example: 'Customer confirmed the amount is not in their account' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+
+  @ApiPropertyOptional({ example: 'rfnd_manual_1001' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
 }
 
 export class ReturnOrderDto {

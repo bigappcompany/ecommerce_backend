@@ -1,4 +1,5 @@
 import {
+  addressDecision,
   cancellationDecision,
   canonicalStatus,
   nextStatuses,
@@ -64,5 +65,21 @@ describe('order journey rules', () => {
     expect(shouldRestoreStock({ status: 'pending', payment_status: 'unpaid' })).toBe(false);
     expect(shouldRestoreStock({ status: 'failed', payment_status: 'failed' })).toBe(false);
     expect(shouldRestoreStock({ status: 'packed', stock_restored: true })).toBe(false);
+  });
+
+  it('refunds only cancelled units on a live order and allows a refund the customer did not receive', () => {
+    const paid = { status: 'order_received', payment_status: 'paid', total: 1500, paid_amount: 3000, cancelled_amount: 1500, refunded_amount: 0 };
+    expect(refundDecision(paid).allowed).toBe(true);
+    expect(refundDecision(paid).refundable_amount).toBe(1500);
+    const missing = { status: 'cancelled', payment_status: 'paid', total: 0, paid_amount: 3000, refund_status: 'not_received', refunded_amount: 0 };
+    expect(refundDecision(missing).allowed).toBe(true);
+    expect(refundDecision(missing).refundable_amount).toBe(3000);
+  });
+
+  it('lets an admin change the address until delivery and locks it for a customer after shipping', () => {
+    expect(addressDecision({ status: 'packed' }).allowed).toBe(true);
+    expect(addressDecision({ status: 'shipped' }).allowed).toBe(false);
+    expect(addressDecision({ status: 'shipped' }, true).allowed).toBe(true);
+    expect(addressDecision({ status: 'delivered' }, true).allowed).toBe(false);
   });
 });

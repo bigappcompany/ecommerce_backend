@@ -18,12 +18,15 @@ import { Product } from './entities/product.entity';
 import { User } from '../users/entities/user.entity';
 import {
   backfillPlan,
+  addressDecision,
   buildJourney,
   cancellationDecision,
   canonicalStatus,
+  chargedAmount,
   labelFor,
   money,
   nextStatuses,
+  partialCancelDecision,
   refundDecision,
   returnDecision,
   shouldRestoreStock,
@@ -64,6 +67,19 @@ export class OrdersService implements OnModuleInit {
     for (const order of missing) {
       await this.assignOrderNumber(order);
     }
+    await this.orders
+      .createQueryBuilder()
+      .update()
+      .set({ paid_amount: () => '"total"' })
+      .where('paid_amount = 0')
+      .andWhere(
+        `(payment_status IN (:...paid) OR (razorpay_payment_id IS NOT NULL AND status NOT IN (:...open)))`,
+        {
+          paid: ['paid', 'partially_refunded', 'refund_initiated', 'refunded'],
+          open: ['pending', 'failed'],
+        },
+      )
+      .execute();
   }
 
   private async assignOrderNumber(order: ShopOrder) {
@@ -258,6 +274,7 @@ export class OrdersService implements OnModuleInit {
     order.previous_status = order.status;
     order.status = 'order_received';
     order.payment_status = 'paid';
+    order.paid_amount = money(Number(order.total));
     order.razorpay_payment_id = body.razorpay_payment_id;
     order.razorpay_order_id = body.razorpay_order_id || order.razorpay_order_id;
     await this.orders.save(order);
@@ -379,7 +396,7 @@ export class OrdersService implements OnModuleInit {
       await this.ensureHistory(order);
       const customer = byId.get(order.user_id);
       views.push(
-        this.toView(order, customer?.email, customer?.first_name, customer?.last_name),
+        this.toView(order, customer?.email, customer?.first_name, customer?.last_name, true),
       );
     }
     return views;
@@ -388,7 +405,7 @@ export class OrdersService implements OnModuleInit {
   async getForActor(id: string, actor: OrderActor) {
     const order = await this.loadOrder(id);
     this.assertCanView(order, actor);
-    return this.toView(order);
+    return this.toView(order, undefined, undefined, undefined, this.canManageOrder(actor));
   }
 
   async getStatus(id: string, actor: OrderActor) {
@@ -470,7 +487,10 @@ export class OrdersService implements OnModuleInit {
     return this.getForActor(id, { ...actor, role: 'admin' });
   }
 
-  async cancelOrder(id: string, body: { reason: string }, actor: OrderActor) {
+  async cancelOrder(id: string, body: { reason: string; items?: { item_id: string; quantity: number }[] }, actor: OrderActor) {
+    if (body.items?.length) {
+      return this.cancelItems(id, body, actor);
+    }
     const order = await this.loadOrder(id);
     this.assertCanView(order, actor);
     const decision = cancellationDecision(order);
@@ -484,6 +504,12 @@ export class OrdersService implements OnModuleInit {
     if (shouldRestoreStock(order)) {
       await this.restoreStock(order);
     }
+    for (const item of order.items || []) {
+      item.cancelled_quantity = item.quantity;
+    }
+    if (order.items?.length) await this.orderItems.save(order.items);
+    order.cancelled_amount = money(chargedAmount(order) || Number(order.total || 0));
+    order.total = 0;
     order.previous_status = order.status;
     order.status = 'cancelled';
     order.cancel_reason = reason;
@@ -499,6 +525,158 @@ export class OrdersService implements OnModuleInit {
       actor,
     });
     return this.getForActor(id, actor.role === 'user' ? actor : { ...actor, role: 'admin' });
+  }
+
+  async cancelItems(
+    id: string,
+    body: { reason: string; items?: { item_id: string; quantity: number }[] },
+    actor: OrderActor,
+  ) {
+    const order = await this.loadOrder(id);
+    this.assertCanView(order, actor);
+    const staff = this.canManageOrder(actor);
+    const decision = partialCancelDecision(order, staff);
+    if (!decision.allowed) throw new BadRequestException(decision.reason);
+    const reason = String(body.reason || '').trim();
+    if (reason.length < 3) throw new BadRequestException('A cancellation reason is required');
+    const lines = body.items || [];
+    if (!lines.length) throw new BadRequestException('Choose at least one item to cancel');
+    let cancelledValue = 0;
+    const notes: string[] = [];
+    const shipped = ['shipped', 'in_transit', 'out_for_delivery', 'delivery_failed', 'return_requested', 'return_in_transit', 'returned'].includes(
+      canonicalStatus(order.status),
+    );
+    for (const line of lines) {
+      const item = (order.items || []).find((row) => row.id === line.item_id);
+      if (!item) throw new BadRequestException('That item is not on this order');
+      const active = item.quantity - Number(item.cancelled_quantity || 0);
+      const qty = Math.floor(Number(line.quantity));
+      if (qty < 1 || qty > active) {
+        throw new BadRequestException(`${item.name} only has ${active} unit${active === 1 ? '' : 's'} that can be cancelled`);
+      }
+      if (!shipped && item.product_id && shouldRestoreStock(order)) {
+        await this.products.increment({ id: item.product_id }, 'stock', qty);
+      }
+      item.cancelled_quantity = Number(item.cancelled_quantity || 0) + qty;
+      cancelledValue += Number(item.price) * qty;
+      notes.push(`${qty} × ${item.name}`);
+    }
+    await this.orderItems.save(order.items);
+    order.cancelled_amount = money(Number(order.cancelled_amount || 0) + cancelledValue);
+    order.total = money(
+      (order.items || []).reduce(
+        (sum, item) => sum + Number(item.price) * (item.quantity - Number(item.cancelled_quantity || 0)),
+        0,
+      ),
+    );
+    const activeLeft = (order.items || []).some((item) => item.quantity - Number(item.cancelled_quantity || 0) > 0);
+    if (!activeLeft) {
+      order.previous_status = order.status;
+      order.status = 'cancelled';
+      order.cancel_reason = reason;
+      order.cancelled_at = new Date();
+    }
+    if (wasCharged(order) && ['none', 'refunded', 'failed', 'not_received'].includes(order.refund_status || 'none')) {
+      order.refund_status = order.refund_status === 'not_received' ? 'not_received' : 'eligible';
+    }
+    await this.orders.save(order);
+    await this.appendEvent(order, {
+      status: activeLeft ? canonicalStatus(order.status) : 'cancelled',
+      label: activeLeft ? 'Items cancelled' : 'Cancelled',
+      note: `${notes.join(', ')}. ${reason}`,
+      actor,
+    });
+    return this.getForActor(id, actor.role === 'user' ? actor : { ...actor, role: 'admin' });
+  }
+
+  async updateAddress(id: string, body: any, actor: OrderActor) {
+    const order = await this.loadOrder(id);
+    this.assertCanView(order, actor);
+    const staff = this.canManageOrder(actor);
+    const decision = addressDecision(order, staff);
+    if (!decision.allowed) throw new BadRequestException(decision.reason);
+    const name = String(body.shipping_name || '').trim();
+    const phone = String(body.phone || '').trim();
+    const address = String(body.address || '').trim();
+    if (!name || !phone || !address) {
+      throw new BadRequestException('Name, phone, and address are required');
+    }
+    const previous = [order.shipping_name, order.address, order.city, order.pincode].filter(Boolean).join(', ');
+    order.shipping_name = name;
+    order.phone = phone;
+    order.address = address;
+    order.city = String(body.city || '').trim();
+    order.pincode = String(body.pincode || '').trim();
+    await this.orders.save(order);
+    const next = [order.shipping_name, order.address, order.city, order.pincode].filter(Boolean).join(', ');
+    await this.appendEvent(order, {
+      status: canonicalStatus(order.status),
+      label: 'Address updated',
+      note: `${previous} → ${next}`,
+      actor,
+    });
+    return this.getForActor(id, actor.role === 'user' ? actor : { ...actor, role: 'admin' });
+  }
+
+  async updateRefundStatus(id: string, body: any, actor: OrderActor) {
+    if (!this.canManageOrder(actor)) {
+      throw new ForbiddenException('Only an admin can change the refund status');
+    }
+    const order = await this.loadOrder(id);
+    const next = String(body.status || '').trim();
+    const allowed = ['eligible', 'initiated', 'processing', 'partially_refunded', 'refunded', 'not_received', 'failed'];
+    if (!allowed.includes(next)) throw new BadRequestException('Invalid refund status');
+    if (!wasCharged(order) && next !== 'failed') {
+      throw new BadRequestException('Refund status can be changed only after the order is paid');
+    }
+    if (next === 'not_received' && !['processing', 'refunded', 'partially_refunded', 'not_received'].includes(order.refund_status || '')) {
+      throw new BadRequestException('Mark a refund as not received only after one has been sent');
+    }
+    if (next === 'not_received' && ['refunded', 'partially_refunded'].includes(order.refund_status || '')) {
+      order.refunded_amount = 0;
+      order.payment_status = 'paid';
+      if (order.status === 'refunded' && order.previous_status) {
+        order.status = order.previous_status;
+      }
+    }
+    if (next === 'refunded') {
+      const paid = chargedAmount(order);
+      order.refunded_amount = paid;
+      order.payment_status = 'refunded';
+      order.previous_status = order.status === 'refunded' ? order.previous_status : order.status;
+      order.status = 'refunded';
+      if (body.reference) order.refund_reference = String(body.reference).trim();
+    }
+    if (next === 'partially_refunded') {
+      order.payment_status = 'partially_refunded';
+      if (body.reference) order.refund_reference = String(body.reference).trim();
+    }
+    if (next === 'failed') {
+      order.payment_status = wasCharged(order) ? order.payment_status === 'refunded' ? 'paid' : order.payment_status : 'failed';
+    }
+    order.refund_status = next;
+    order.refund_note = String(body.note || '').trim() || order.refund_note;
+    await this.orders.save(order);
+    const refundLabels: Record<string, string> = {
+      eligible: 'Refund eligible',
+      initiated: 'Refund initiated',
+      processing: 'Refund processing',
+      partially_refunded: 'Partially refunded',
+      refunded: 'Refunded',
+      not_received: 'Refund not received',
+      failed: 'Refund failed',
+    };
+    await this.appendEvent(order, {
+      status: next === 'refunded' ? 'refunded' : 'refund_initiated',
+      label: refundLabels[next] || 'Refund updated',
+      note: body.note || `Refund status set to ${next.replace(/_/g, ' ')}`,
+      actor,
+    });
+    return this.getForActor(id, { ...actor, role: 'admin' });
+  }
+
+  private canManageOrder(actor: OrderActor) {
+    return actor.role === 'admin' || actor.role === 'superadmin' || actor.role === 'api';
   }
 
   async requestReturn(id: string, body: { reason: string }, actor: OrderActor, opts?: { force?: boolean }) {
@@ -604,7 +782,7 @@ export class OrdersService implements OnModuleInit {
     actor: OrderActor,
   ) {
     order.refunded_amount = money(Number(order.refunded_amount || 0) + amount);
-    const fully = order.refunded_amount + 0.001 >= money(Number(order.total || 0));
+    const fully = order.refunded_amount + 0.001 >= money(chargedAmount(order) || Number(order.total || 0));
     order.refund_status = fully ? 'refunded' : 'partially_refunded';
     order.payment_status = fully ? 'refunded' : 'partially_refunded';
     order.refund_reference = reference;
@@ -658,7 +836,9 @@ export class OrdersService implements OnModuleInit {
     await this.orders.manager.transaction(async (manager) => {
       for (const item of order.items || []) {
         if (!item.product_id) continue;
-        await manager.increment(Product, { id: item.product_id }, 'stock', item.quantity);
+        const remaining = item.quantity - Number(item.cancelled_quantity || 0);
+        if (remaining <= 0) continue;
+        await manager.increment(Product, { id: item.product_id }, 'stock', remaining);
       }
       order.stock_restored = true;
       await manager.update(ShopOrder, order.id, { stock_restored: true });
@@ -751,7 +931,7 @@ export class OrdersService implements OnModuleInit {
     return wasCharged(order) ? 'paid' : 'unpaid';
   }
 
-  private toView(order: ShopOrder, email?: string, firstName?: string, lastName?: string) {
+  private toView(order: ShopOrder, email?: string, firstName?: string, lastName?: string, staff = false) {
     const status = canonicalStatus(order.status);
     const timeline = [...(order.events || [])]
       .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
@@ -767,8 +947,10 @@ export class OrdersService implements OnModuleInit {
         at: event.created_at,
       }));
     const cancel = cancellationDecision(order);
+    const partial = partialCancelDecision(order, staff);
     const returns = returnDecision(order);
     const refund = refundDecision(order);
+    const address = addressDecision(order, staff);
     return {
       id: order.id,
       order_number: order.order_number,
@@ -777,8 +959,12 @@ export class OrdersService implements OnModuleInit {
       status_label: labelFor(status),
       payment_status: this.paymentLabel(order),
       refund_status: order.refund_status || 'none',
+      refund_status_label: labelFor(order.refund_status && order.refund_status !== 'none' ? order.refund_status : 'none'),
+      refund_note: order.refund_note || null,
       refunded_amount: money(Number(order.refunded_amount || 0)),
       refund_reference: order.refund_reference || null,
+      paid_amount: money(Number(order.paid_amount || 0)),
+      cancelled_amount: money(Number(order.cancelled_amount || 0)),
       total: order.total,
       shipping_name: order.shipping_name,
       phone: order.phone,
@@ -805,17 +991,23 @@ export class OrdersService implements OnModuleInit {
         image_url: item.image_url,
         price: item.price,
         quantity: item.quantity,
+        cancelled_quantity: Number(item.cancelled_quantity || 0),
+        active_quantity: item.quantity - Number(item.cancelled_quantity || 0),
       })),
       journey: buildJourney(status, timeline.map((event) => ({ status: event.status, created_at: event.at }))),
       timeline,
       actions: {
         can_cancel: cancel.allowed,
         cancel_block_reason: cancel.reason,
+        can_cancel_items: partial.allowed,
         can_request_return: returns.allowed,
         return_block_reason: returns.reason,
         can_refund: refund.allowed,
         refund_block_reason: refund.reason,
         refundable_amount: refund.refundable_amount,
+        can_change_address: address.allowed,
+        address_block_reason: address.reason,
+        can_set_refund_status: staff && wasCharged(order),
         next_statuses: nextStatuses(status),
       },
     };

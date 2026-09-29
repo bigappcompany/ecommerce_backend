@@ -17,7 +17,7 @@ import {
   ProductUpdateDto,
   ProductWriteDto,
 } from './dto/shop.dto';
-import { CancelOrderDto, RefundOrderDto, ReturnOrderDto, UpdateOrderStatusDto } from './dto/order-journey.dto';
+import { CancelOrderDto, RefundOrderDto, ReturnOrderDto, UpdateAddressDto, UpdateOrderStatusDto, UpdateRefundStatusDto } from './dto/order-journey.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('Integrations')
@@ -227,10 +227,40 @@ export class IntegrationsController {
     summary: 'Cancel an order before it ships',
     description: 'Blocked after the order is shipped, delivered, or already cancelled.',
   })
-  @ApiBody({ type: CancelOrderDto, examples: { reason: { value: { reason: 'Customer asked to cancel before packing' } } } })
+  @ApiBody({
+    type: CancelOrderDto,
+    examples: {
+      reason: { value: { reason: 'Customer asked to cancel before packing' } },
+      partial: { value: { reason: 'Cancel one unit', items: [{ item_id: 'item-uuid', quantity: 1 }] } },
+    },
+  })
   @ApiScopes('orders:write')
   cancelOrder(@Param('id') id: string, @Body() body: CancelOrderDto, @Req() req) {
     return this.ordersService.cancelOrder(id, body, this.apiActor(req));
+  }
+
+  @Patch('orders/:id/address')
+  @ApiOperation({
+    operationId: 'updatePartnerOrderAddress',
+    summary: 'Change a delivery address before delivery',
+    description: 'Requires orders:write. Blocked after delivery.',
+  })
+  @ApiBody({ type: UpdateAddressDto })
+  @ApiScopes('orders:write')
+  updateAddress(@Param('id') id: string, @Body() body: UpdateAddressDto, @Req() req) {
+    return this.ordersService.updateAddress(id, body, this.apiActor(req));
+  }
+
+  @Patch('orders/:id/refund-status')
+  @ApiOperation({
+    operationId: 'updatePartnerRefundStatus',
+    summary: 'Set refund status, including refund not received',
+    description: 'Requires orders:refund. Use not_received when the customer did not get the money.',
+  })
+  @ApiBody({ type: UpdateRefundStatusDto })
+  @ApiScopes('orders:refund')
+  updateRefundStatus(@Param('id') id: string, @Body() body: UpdateRefundStatusDto, @Req() req) {
+    return this.ordersService.updateRefundStatus(id, body, this.apiActor(req));
   }
 
   @Post('orders/:id/return')

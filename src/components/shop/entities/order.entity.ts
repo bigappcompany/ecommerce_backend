@@ -26,6 +26,12 @@ export class ShopOrder {
   @Column({ type: 'float', default: 0 })
   total: number;
 
+  @Column({ type: 'float', default: 0 })
+  paid_amount: number;
+
+  @Column({ type: 'float', default: 0 })
+  cancelled_amount: number;
+
   @Column({ nullable: true })
   shipping_name: string;
 
@@ -58,6 +64,9 @@ export class ShopOrder {
 
   @Column({ nullable: true })
   refund_reference: string;
+
+  @Column({ type: 'text', nullable: true })
+  refund_note: string;
 
   @Column({ nullable: true })
   tracking_id: string;

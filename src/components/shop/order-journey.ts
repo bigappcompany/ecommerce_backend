@@ -64,6 +64,9 @@ const LABELS: Record<string, string> = {
   returned: 'Returned to warehouse',
   refund_initiated: 'Refund initiated',
   refunded: 'Refunded',
+  partially_refunded: 'Partially refunded',
+  not_received: 'Refund not received',
+  processing: 'Refund processing',
 };
 
 /** Statuses the store can set, in order. A step cannot be skipped. */
@@ -102,6 +105,8 @@ export type OrderSnapshot = {
   payment_status?: string | null;
   refund_status?: string | null;
   refunded_amount?: number | null;
+  paid_amount?: number | null;
+  cancelled_amount?: number | null;
   total?: number | null;
   razorpay_payment_id?: string | null;
   delivered_at?: Date | string | null;
@@ -139,10 +144,34 @@ export function wasCharged(order: OrderSnapshot) {
   return status !== 'pending' && status !== 'failed';
 }
 
+export const REFUND_STATUSES = [
+  'eligible',
+  'initiated',
+  'processing',
+  'partially_refunded',
+  'refunded',
+  'not_received',
+  'failed',
+] as const;
+
+export function chargedAmount(order: OrderSnapshot) {
+  const paid = Number(order.paid_amount || 0);
+  if (paid > 0) return paid;
+  return wasCharged(order) ? Number(order.total || 0) : 0;
+}
+
 export function refundableAmount(order: OrderSnapshot) {
   if (!wasCharged(order)) return 0;
-  const remaining = money(Number(order.total || 0) - Number(order.refunded_amount || 0));
-  return remaining > 0 ? remaining : 0;
+  const remainingPaid = money(chargedAmount(order) - Number(order.refunded_amount || 0));
+  if (remainingPaid <= 0) return 0;
+  const status = canonicalStatus(order.status);
+  const wholeOrder =
+    ['cancelled', 'returned', 'failed'].includes(status) ||
+    order.refund_status === 'not_received' ||
+    order.refund_status === 'failed';
+  if (wholeOrder) return remainingPaid;
+  const fromCancelledLines = money(Number(order.cancelled_amount || 0) - Number(order.refunded_amount || 0));
+  return Math.max(0, Math.min(remainingPaid, fromCancelledLines));
 }
 
 export function shouldRestoreStock(order: OrderSnapshot) {
@@ -233,6 +262,12 @@ export function refundDecision(order: OrderSnapshot): Decision & { refundable_am
   if (order.refund_status === 'refunded' || status === 'refunded') {
     return { allowed: false, refundable_amount: 0, reason: 'This order is already refunded.' };
   }
+  if (order.refund_status === 'not_received' || order.refund_status === 'failed') {
+    return { allowed: true, refundable_amount, reason: null };
+  }
+  if (money(Number(order.cancelled_amount || 0)) > money(Number(order.refunded_amount || 0))) {
+    return { allowed: true, refundable_amount, reason: null };
+  }
   if (status === 'failed' && order.razorpay_payment_id) {
     return { allowed: true, refundable_amount, reason: null };
   }
@@ -283,6 +318,28 @@ export function refundDecision(order: OrderSnapshot): Decision & { refundable_am
     };
   }
   return { allowed: false, refundable_amount, reason: 'Refund is not available for this order.' };
+}
+
+export function addressDecision(order: OrderSnapshot, staff = false): Decision {
+  const status = canonicalStatus(order.status);
+  if (['cancelled', 'refunded', 'failed', 'delivered'].includes(status)) {
+    return { allowed: false, reason: 'The delivery address can no longer be changed.' };
+  }
+  if (staff) return { allowed: true, reason: null };
+  if (['pending', 'order_received', 'packed'].includes(status)) return { allowed: true, reason: null };
+  return {
+    allowed: false,
+    reason: 'The address is locked after the order ships. An admin can still change it before delivery.',
+  };
+}
+
+export function partialCancelDecision(order: OrderSnapshot, staff = false): Decision {
+  const status = canonicalStatus(order.status);
+  if (['delivered', 'refunded', 'failed'].includes(status)) {
+    return { allowed: false, reason: 'Items can no longer be cancelled on this order.' };
+  }
+  if (staff && status !== 'cancelled') return { allowed: true, reason: null };
+  return cancellationDecision(order);
 }
 
 export function transitionMessage(current: string, next: string, allowed: string[]) {

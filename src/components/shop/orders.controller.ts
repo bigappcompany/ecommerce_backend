@@ -18,7 +18,9 @@ import {
   OrderActionsDto,
   RefundOrderDto,
   ReturnOrderDto,
+  UpdateAddressDto,
   UpdateOrderStatusDto,
+  UpdateRefundStatusDto,
 } from './dto/order-journey.dto';
 import { OrderActor, OrdersService } from './orders.service';
 
@@ -107,9 +109,53 @@ export class OrdersController {
     description:
       'Allowed for pending, order_received, and packed. Blocked after shipped, in transit, out for delivery, delivered, or once a return or refund has started. Paid cancellations become refund-eligible and stock is returned.',
   })
-  @ApiBody({ type: CancelOrderDto })
+  @ApiBody({
+    type: CancelOrderDto,
+    examples: {
+      whole: { summary: 'Cancel the whole order', value: { reason: 'Ordered the wrong size' } },
+      partial: {
+        summary: 'Cancel 1 of 3 items',
+        value: { reason: 'One pair is the wrong size', items: [{ item_id: 'item-uuid', quantity: 1 }] },
+      },
+    },
+  })
   cancel(@Req() req, @Param('id') id: string, @Body() body: CancelOrderDto) {
     return this.ordersService.cancelOrder(id, body, actorFromUser(req.user));
+  }
+
+  @Patch(':id/address')
+  @ApiOperation({
+    operationId: 'updateOrderAddress',
+    summary: 'Change the delivery address',
+    description: 'Customers can change it until the order is packed. Admins can change it until delivery.',
+  })
+  @ApiBody({ type: UpdateAddressDto })
+  updateAddress(@Req() req, @Param('id') id: string, @Body() body: UpdateAddressDto) {
+    return this.ordersService.updateAddress(id, body, actorFromUser(req.user));
+  }
+
+  @Patch(':id/refund-status')
+  @Roles('admin')
+  @ApiOperation({
+    operationId: 'updateRefundStatus',
+    summary: 'Set the refund status, including refund not received',
+    description: 'Admin only. Use not_received when the customer says the money never arrived so the refund can be sent again.',
+  })
+  @ApiBody({
+    type: UpdateRefundStatusDto,
+    examples: {
+      missing: {
+        summary: 'Customer did not receive the refund',
+        value: { status: 'not_received', note: 'Amount is not in the customer account' },
+      },
+      received: {
+        summary: 'Mark the refund as received',
+        value: { status: 'refunded', reference: 'rfnd_manual_1001', note: 'Customer confirmed the credit' },
+      },
+    },
+  })
+  updateRefundStatus(@Req() req, @Param('id') id: string, @Body() body: UpdateRefundStatusDto) {
+    return this.ordersService.updateRefundStatus(id, body, actorFromUser(req.user));
   }
 
   @Post(':id/return')

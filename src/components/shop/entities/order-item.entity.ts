@@ -23,4 +23,7 @@ export class OrderItem {
 
   @Column({ default: 1 })
   quantity: number;
+
+  @Column({ default: 0 })
+  cancelled_quantity: number;
 }
