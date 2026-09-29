@@ -188,22 +188,20 @@ export class OrdersService {
     return this.attachCustomers(orders);
   }
 
+  async checkoutForCustomer(email: string, shipping: any) {
+    const user = await this.customerByEmail(email);
+    return this.checkout(user.id, shipping);
+  }
+
+  async confirmForCustomer(email: string, body: any) {
+    const user = await this.customerByEmail(email);
+    const order = await this.confirm(user.id, body);
+    const listed = await this.findByEmail(email);
+    return { paid_order_id: order.id, ...listed };
+  }
+
   async findByEmail(email: string) {
-    const normalized = email.trim().toLowerCase();
-    const user = await this.users
-      .createQueryBuilder('user')
-      .select([
-        'user.id',
-        'user.email',
-        'user.first_name',
-        'user.last_name',
-        'user.phone_number',
-      ])
-      .where('LOWER(user.email) = :email', { email: normalized })
-      .getOne();
-    if (!user) {
-      throw new NotFoundException('Customer not found');
-    }
+    const user = await this.customerByEmail(email);
     const orders = await this.orders.find({
       where: { user_id: user.id },
       relations: ['items'],
@@ -219,6 +217,28 @@ export class OrdersService {
       },
       orders: orders.map((order) => this.presentOrder(order, user.email, user.first_name, user.last_name)),
     };
+  }
+
+  private async customerByEmail(email: string) {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) {
+      throw new BadRequestException('email is required');
+    }
+    const user = await this.users
+      .createQueryBuilder('user')
+      .select([
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name',
+        'user.phone_number',
+      ])
+      .where('LOWER(user.email) = :email', { email: normalized })
+      .getOne();
+    if (!user) {
+      throw new NotFoundException('Customer not found');
+    }
+    return user;
   }
 
   private async attachCustomers(orders: ShopOrder[]) {

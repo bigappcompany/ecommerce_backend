@@ -9,12 +9,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { JwtAccessTokenGuard } from '../auth/passport/jwt-access.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { OptionalApiKeyGuard } from './api-key.guard';
 import { ListProductsQuery } from './dto/list-products.query';
+import { ProductUpdateDto, ProductWriteDto } from './dto/shop.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('Products')
@@ -23,6 +24,11 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
+  @ApiOperation({
+    operationId: 'listProducts',
+    summary: 'List products',
+    description: 'search and category are optional. Send x-api-key when calling as a partner.',
+  })
   @ApiSecurity('api-key')
   @UseGuards(OptionalApiKeyGuard)
   list(@Query() query: ListProductsQuery) {
@@ -48,7 +54,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @UseGuards(JwtAccessTokenGuard, RolesGuard)
   @Roles('admin')
-  create(@Body() body: any) {
+  @ApiOperation({ operationId: 'createProduct', summary: 'Create a product' })
+  create(@Body() body: ProductWriteDto) {
     return this.productsService.create(body);
   }
 
@@ -56,7 +63,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @UseGuards(JwtAccessTokenGuard, RolesGuard)
   @Roles('admin')
-  update(@Param('id') id: string, @Body() body: any) {
+  @ApiOperation({ operationId: 'updateProduct', summary: 'Update a product' })
+  update(@Param('id') id: string, @Body() body: ProductUpdateDto) {
     return this.productsService.update(id, body);
   }
 

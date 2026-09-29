@@ -10,10 +10,11 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAccessTokenGuard } from '../auth/passport/jwt-access.guard';
 import { OptionalJwtGuard } from 'src/common/guards/optional-jwt.guard';
 import { CartOwner, CartService } from './cart.service';
+import { CartItemDto, UpdateCartQuantityDto } from './dto/shop.dto';
 
 @ApiTags('Cart')
 @ApiBearerAuth()
@@ -44,6 +45,7 @@ export class CartController {
   }
 
   @Get()
+  @ApiOperation({ operationId: 'getMyCart', summary: 'Get the current cart' })
   get(@Req() req) {
     return this.cartService.getOrCreate(this.owner(req));
   }
@@ -55,12 +57,14 @@ export class CartController {
   }
 
   @Post('items')
-  add(@Req() req, @Body() body: { product_id: string; quantity?: number }) {
+  @ApiOperation({ operationId: 'addMyCartItem', summary: 'Add a product to the cart' })
+  add(@Req() req, @Body() body: CartItemDto) {
     return this.cartService.addItem(this.owner(req), body.product_id, body.quantity);
   }
 
   @Patch('items/:id')
-  update(@Req() req, @Param('id') id: string, @Body() body: { quantity: number }) {
+  @ApiOperation({ operationId: 'updateMyCartItem', summary: 'Change a cart item quantity' })
+  update(@Req() req, @Param('id') id: string, @Body() body: UpdateCartQuantityDto) {
     return this.cartService.updateItem(this.owner(req), id, body.quantity);
   }
 

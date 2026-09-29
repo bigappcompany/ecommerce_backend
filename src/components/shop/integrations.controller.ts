@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { ApiScopes } from 'src/common/decorators/api-scopes.decorator';
 import { ApiKeyGuard } from './api-key.guard';
@@ -8,6 +8,16 @@ import { OrdersService } from './orders.service';
 import { AddCartItemQuery, CustomerLookupQuery, UpdateCartItemQuery } from './dto/customer-lookup.query';
 import { ListOrdersQuery } from './dto/list-orders.query';
 import { ListProductsQuery } from './dto/list-products.query';
+import {
+  CheckoutSessionDto,
+  IntegrationCartItemDto,
+  IntegrationCartQuantityDto,
+  IntegrationCheckoutDto,
+  IntegrationConfirmPaymentDto,
+  ProductUpdateDto,
+  ProductWriteDto,
+  UpdateOrderStatusDto,
+} from './dto/shop.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('Integrations')
@@ -22,6 +32,11 @@ export class IntegrationsController {
   ) {}
 
   @Post('guests')
+  @ApiOperation({
+    operationId: 'createGuestCart',
+    summary: 'Create a guest cart',
+    description: 'No request body. Returns a guest token, an empty cart, and a storefront link.',
+  })
   @ApiScopes('cart:write')
   async createGuest() {
     const guestToken = randomUUID();
@@ -57,28 +72,16 @@ export class IntegrationsController {
     description:
       'Optional query email. Pass the email the customer shared. product_id can be sent in the query or the body.',
   })
-  @ApiBody({
-    required: false,
-    schema: {
-      type: 'object',
-      properties: {
-        email: { type: 'string', description: 'Customer email. Optional if sent as a query parameter.' },
-        guest_token: { type: 'string' },
-        product_id: { type: 'string' },
-        quantity: { type: 'number' },
-      },
-    },
-  })
   @ApiScopes('cart:write')
-  async addCartItem(
-    @Query() query: AddCartItemQuery,
-    @Body() body: { guest_token?: string; email?: string; product_id?: string; quantity?: number },
-  ) {
+  async addCartItem(@Query() query: AddCartItemQuery, @Body() body: IntegrationCartItemDto) {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: body?.guest_token || query.guest_token,
       email: body?.email || query.email,
     });
     const productId = body?.product_id || query.product_id;
+    if (!productId) {
+      throw new BadRequestException('product_id is required');
+    }
     const quantity = body?.quantity ?? (query.quantity ? Number(query.quantity) : undefined);
     return this.cartService.addItem(owner, productId, quantity);
   }
@@ -93,13 +96,16 @@ export class IntegrationsController {
   async updateCartItem(
     @Param('id') id: string,
     @Query() query: UpdateCartItemQuery,
-    @Body() body: { guest_token?: string; email?: string; quantity?: number },
+    @Body() body: IntegrationCartQuantityDto,
   ) {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: body?.guest_token || query.guest_token,
       email: body?.email || query.email,
     });
-    const quantity = body?.quantity ?? Number(query.quantity);
+    const quantity = body?.quantity ?? (query.quantity != null && query.quantity !== '' ? Number(query.quantity) : undefined);
+    if (quantity == null || Number.isNaN(quantity)) {
+      throw new BadRequestException('quantity is required');
+    }
     return this.cartService.updateItem(owner, id, quantity);
   }
 
@@ -119,6 +125,11 @@ export class IntegrationsController {
   }
 
   @Get('products')
+  @ApiOperation({
+    operationId: 'listPartnerProducts',
+    summary: 'List products',
+    description: 'search and category are optional. No request body.',
+  })
   list(@Query() query: ListProductsQuery) {
     return this.productsService.list(query);
   }
@@ -129,14 +140,16 @@ export class IntegrationsController {
   }
 
   @Post('products')
+  @ApiOperation({ operationId: 'createPartnerProduct', summary: 'Create a product' })
   @ApiScopes('products:write')
-  create(@Body() body: any) {
+  create(@Body() body: ProductWriteDto) {
     return this.productsService.create(body);
   }
 
   @Patch('products/:id')
+  @ApiOperation({ operationId: 'updatePartnerProduct', summary: 'Update a product' })
   @ApiScopes('products:write')
-  update(@Param('id') id: string, @Body() body: any) {
+  update(@Param('id') id: string, @Body() body: ProductUpdateDto) {
     return this.productsService.update(id, body);
   }
 
@@ -149,7 +162,7 @@ export class IntegrationsController {
   @Get('orders')
   @ApiOperation({
     operationId: 'getOrdersByCustomerEmail',
-    summary: 'Get orders by customer email',
+    summary: 'List orders, optionally for one customer email',
     description:
       'Optional query email. When a customer shares an email, call this API with that email to get their orders, the products on each order, and the status. Omit email to list every order.',
   })
@@ -161,9 +174,35 @@ export class IntegrationsController {
     return this.ordersService.findAll();
   }
 
-  @Patch('orders/:id')
+  @Post('checkout')
+  @ApiOperation({
+    operationId: 'checkoutOrder',
+    summary: 'Checkout a customer cart and start Razorpay payment',
+    description:
+      'Pass the customer email in the body or as the email query parameter. Creates a pending order from that cart and returns the Razorpay key, amount in paise, and order id. Use key rzp_test_TUonZJyePNzIs5 when the response key is empty. Then call confirmOrderPayment.',
+  })
+  @ApiOkResponse({ type: CheckoutSessionDto })
   @ApiScopes('orders:write')
-  updateOrder(@Param('id') id: string, @Body() body: { status: string }) {
+  checkout(@Query() query: CustomerLookupQuery, @Body() body: IntegrationCheckoutDto) {
+    return this.ordersService.checkoutForCustomer(body.email || query.email, body);
+  }
+
+  @Post('orders/confirm')
+  @ApiOperation({
+    operationId: 'confirmOrderPayment',
+    summary: 'Finish Razorpay payment and list the customer orders',
+    description:
+      'Send order_id and razorpay_payment_id from the Razorpay success handler, plus the customer email. Marks the order paid, clears the cart, and returns every order for that email.',
+  })
+  @ApiScopes('orders:write')
+  confirm(@Query() query: CustomerLookupQuery, @Body() body: IntegrationConfirmPaymentDto) {
+    return this.ordersService.confirmForCustomer(body.email || query.email, body);
+  }
+
+  @Patch('orders/:id')
+  @ApiOperation({ operationId: 'updatePartnerOrderStatus', summary: 'Update an order status' })
+  @ApiScopes('orders:write')
+  updateOrder(@Param('id') id: string, @Body() body: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, body.status);
   }
 }
