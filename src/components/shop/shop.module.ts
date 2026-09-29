@@ -5,6 +5,7 @@ import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
 import { ShopOrder } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderEvent } from './entities/order-event.entity';
 import { ApiCredential } from './entities/api-key.entity';
 import { User } from '../users/entities/user.entity';
 import { ProductsService } from './products.service';
@@ -28,6 +29,7 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
       CartItem,
       ShopOrder,
       OrderItem,
+      OrderEvent,
       ApiCredential,
       User,
     ]),

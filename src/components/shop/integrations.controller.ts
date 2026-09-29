@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ApiBody, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'crypto';
 import { ApiScopes } from 'src/common/decorators/api-scopes.decorator';
 import { ApiKeyGuard } from './api-key.guard';
@@ -16,8 +16,8 @@ import {
   IntegrationConfirmPaymentDto,
   ProductUpdateDto,
   ProductWriteDto,
-  UpdateOrderStatusDto,
 } from './dto/shop.dto';
+import { CancelOrderDto, RefundOrderDto, ReturnOrderDto, UpdateOrderStatusDto } from './dto/order-journey.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('Integrations')
@@ -199,10 +199,106 @@ export class IntegrationsController {
     return this.ordersService.confirmForCustomer(body.email || query.email, body);
   }
 
+  @Get('orders/:id/status')
+  @ApiOperation({
+    operationId: 'getPartnerOrderStatus',
+    summary: 'Check an order status and timeline',
+    description:
+      'Returns the current status, journey, timeline, tracking, and why cancel, return, or refund is allowed or blocked.',
+  })
+  @ApiScopes('orders:read')
+  orderStatus(@Param('id') id: string) {
+    return this.ordersService.getStatus(id, { role: 'api' });
+  }
+
+  @Get('orders/:id')
+  @ApiOperation({
+    operationId: 'getPartnerOrder',
+    summary: 'Get one order with items, timeline, and allowed actions',
+  })
+  @ApiScopes('orders:read')
+  order(@Param('id') id: string) {
+    return this.ordersService.getForActor(id, { role: 'api' });
+  }
+
+  @Post('orders/:id/cancel')
+  @ApiOperation({
+    operationId: 'cancelPartnerOrder',
+    summary: 'Cancel an order before it ships',
+    description: 'Blocked after the order is shipped, delivered, or already cancelled.',
+  })
+  @ApiBody({ type: CancelOrderDto, examples: { reason: { value: { reason: 'Customer asked to cancel before packing' } } } })
+  @ApiScopes('orders:write')
+  cancelOrder(@Param('id') id: string, @Body() body: CancelOrderDto, @Req() req) {
+    return this.ordersService.cancelOrder(id, body, this.apiActor(req));
+  }
+
+  @Post('orders/:id/return')
+  @ApiOperation({
+    operationId: 'returnPartnerOrder',
+    summary: 'Open a return within 7 days of delivery',
+  })
+  @ApiBody({ type: ReturnOrderDto, examples: { reason: { value: { reason: 'Customer reported damage on delivery' } } } })
+  @ApiScopes('orders:write')
+  returnOrder(@Param('id') id: string, @Body() body: ReturnOrderDto, @Req() req) {
+    return this.ordersService.requestReturn(id, body, this.apiActor(req));
+  }
+
+  @Post('orders/:id/refund')
+  @ApiOperation({
+    operationId: 'refundPartnerOrder',
+    summary: 'Refund a cancelled, returned, or failed captured payment',
+    description:
+      'Requires orders:refund. Blocked on a live shipment and on a delivered order that was not returned inside 7 days. Use mark_completed and reference when the refund is sent outside Razorpay.',
+  })
+  @ApiBody({
+    type: RefundOrderDto,
+    examples: {
+      gateway: { value: { note: 'Refund after cancellation' } },
+      manual: {
+        value: { amount: 1999, mark_completed: true, reference: 'rfnd_manual_1001', note: 'Sent to the original payment method' },
+      },
+    },
+  })
+  @ApiScopes('orders:refund')
+  refundOrder(@Param('id') id: string, @Body() body: RefundOrderDto, @Req() req) {
+    return this.ordersService.refundOrder(id, body, this.apiActor(req));
+  }
+
+  @Patch('orders/:id/status')
+  @ApiOperation({
+    operationId: 'updatePartnerShipmentStatus',
+    summary: 'Move an order to the next shipment status',
+    description: 'Requires orders:write. A key cannot skip a step or force a status. Send the same status with a note or tracking id to append a timeline update.',
+  })
+  @ApiBody({
+    type: UpdateOrderStatusDto,
+    examples: {
+      packed: { value: { status: 'packed', note: 'Packed at the Bengaluru warehouse', location: 'Bengaluru FC' } },
+      shipped: { value: { status: 'shipped', tracking_id: 'DL1234567890IN', carrier: 'Delhivery', location: 'Bengaluru hub' } },
+      transit: { value: { status: 'in_transit', location: 'Hyderabad hub' } },
+      delivered: { value: { status: 'delivered', note: 'Delivered to the customer' } },
+    },
+  })
+  @ApiScopes('orders:write')
+  updateShipment(@Param('id') id: string, @Body() body: UpdateOrderStatusDto, @Req() req) {
+    return this.ordersService.updateFulfillment(id, body, this.apiActor(req));
+  }
+
   @Patch('orders/:id')
   @ApiOperation({ operationId: 'updatePartnerOrderStatus', summary: 'Update an order status' })
+  @ApiBody({ type: UpdateOrderStatusDto })
   @ApiScopes('orders:write')
-  updateOrder(@Param('id') id: string, @Body() body: UpdateOrderStatusDto) {
-    return this.ordersService.updateStatus(id, body.status);
+  updateOrder(@Param('id') id: string, @Body() body: UpdateOrderStatusDto, @Req() req) {
+    return this.ordersService.updateFulfillment(id, body, this.apiActor(req));
+  }
+
+  private apiActor(req): { id?: string; role: 'api'; name?: string; allowForce: false } {
+    return {
+      id: req.apiKey?.id,
+      role: 'api',
+      name: req.apiKey?.name,
+      allowForce: false,
+    };
   }
 }

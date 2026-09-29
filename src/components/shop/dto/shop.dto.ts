@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CheckoutDto {
   @ApiProperty({ example: 'Alex Shopper' })
@@ -72,8 +72,11 @@ export class IntegrationConfirmPaymentDto extends ConfirmPaymentDto {
 }
 
 export class CheckoutSessionDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Internal order id used to confirm payment' })
   order_id: string;
+
+  @ApiProperty({ example: 'order_123', description: 'Public order id. Use this to look up the order.' })
+  order_number: string;
 
   @ApiProperty({ description: 'Amount in paise' })
   amount: number;
@@ -94,12 +97,7 @@ export class CheckoutSessionDto {
   total: number;
 }
 
-export class UpdateOrderStatusDto {
-  @ApiProperty({ enum: ['paid', 'shipped', 'delivered', 'cancelled', 'failed'] })
-  @IsString()
-  @IsIn(['paid', 'shipped', 'delivered', 'cancelled', 'failed'])
-  status: string;
-}
+export { UpdateOrderStatusDto } from './order-journey.dto';
 
 export class ProductWriteDto {
   @ApiProperty({ example: 'Everyday Headphones' })

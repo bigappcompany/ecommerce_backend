@@ -13,6 +13,7 @@ export const PRODUCT_SCOPES = [
   'products:delete',
   'orders:read',
   'orders:write',
+  'orders:refund',
   'cart:read',
   'cart:write',
 ];

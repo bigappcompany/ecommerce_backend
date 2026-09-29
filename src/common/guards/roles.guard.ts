@@ -19,8 +19,11 @@ export class RolesGuard implements CanActivate {
     if (!roles?.length) {
       return true;
     }
+    const accepted = roles.flatMap((role) =>
+      role === 'admin' ? ['admin', 'superadmin'] : [role],
+    );
     const { user } = context.switchToHttp().getRequest();
-    if (!user || !roles.includes(user.role)) {
+    if (!user || !accepted.includes(user.role)) {
       throw new ForbiddenException('You do not have access to this resource');
     }
     return true;
