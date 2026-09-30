@@ -52,15 +52,16 @@ export class IntegrationsController {
   @Get('cart')
   @ApiOperation({
     operationId: 'getCartByCustomerEmail',
-    summary: 'Get cart by customer email',
+    summary: 'Get a cart by customer email or phone',
     description:
-      'Optional query email. Pass the email the customer shared to load that cart. guest_token is an alternative and is also optional.',
+      'Third-party only. Send email or phone. A cart with no account yet can use guest_token instead. The logged-in shop route does not ask for either.',
   })
   @ApiScopes('cart:read')
   async cart(@Query() query: CustomerLookupQuery) {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: query.guest_token,
       email: query.email,
+      phone: query.phone,
     });
     return this.cartService.getOrCreate(owner);
   }
@@ -68,15 +69,24 @@ export class IntegrationsController {
   @Post('cart/items')
   @ApiOperation({
     operationId: 'addCartItemByCustomerEmail',
-    summary: 'Add a product to a cart by customer email',
-    description:
-      'Optional query email. Pass the email the customer shared. product_id can be sent in the query or the body.',
+    summary: 'Add a product to a cart by customer email or phone',
+    description: 'Send email or phone in the body or query. product_id is required. guest_token is only for a shopper who has no account yet.',
+  })
+  @ApiBody({
+    type: IntegrationCartItemDto,
+    examples: {
+      customer: {
+        summary: 'Add by email or phone',
+        value: { email: 'user@shop.com', phone: '9876543210', product_id: 'product-uuid', quantity: 1 },
+      },
+    },
   })
   @ApiScopes('cart:write')
   async addCartItem(@Query() query: AddCartItemQuery, @Body() body: IntegrationCartItemDto) {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: body?.guest_token || query.guest_token,
       email: body?.email || query.email,
+      phone: body?.phone || query.phone,
     });
     const productId = body?.product_id || query.product_id;
     if (!productId) {
@@ -89,8 +99,14 @@ export class IntegrationsController {
   @Patch('cart/items/:id')
   @ApiOperation({
     operationId: 'updateCartItemByCustomerEmail',
-    summary: 'Update a cart item by customer email',
-    description: 'Optional query email. Pass the email the customer shared.',
+    summary: 'Update a cart item by customer email or phone',
+    description: 'Send email or phone so the item is changed on that customer’s cart.',
+  })
+  @ApiBody({
+    type: IntegrationCartQuantityDto,
+    examples: {
+      customer: { value: { email: 'user@shop.com', phone: '9876543210', quantity: 2 } },
+    },
   })
   @ApiScopes('cart:write')
   async updateCartItem(
@@ -101,6 +117,7 @@ export class IntegrationsController {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: body?.guest_token || query.guest_token,
       email: body?.email || query.email,
+      phone: body?.phone || query.phone,
     });
     const quantity = body?.quantity ?? (query.quantity != null && query.quantity !== '' ? Number(query.quantity) : undefined);
     if (quantity == null || Number.isNaN(quantity)) {
@@ -112,14 +129,15 @@ export class IntegrationsController {
   @Delete('cart/items/:id')
   @ApiOperation({
     operationId: 'removeCartItemByCustomerEmail',
-    summary: 'Remove a cart item by customer email',
-    description: 'Optional query email. Pass the email the customer shared.',
+    summary: 'Remove a cart item by customer email or phone',
+    description: 'Send email or phone as a query parameter. guest_token works only for a cart with no account.',
   })
   @ApiScopes('cart:write')
   async removeCartItem(@Param('id') id: string, @Query() query: CustomerLookupQuery) {
     const owner = await this.cartService.ownerFromCustomer({
       guestToken: query.guest_token,
       email: query.email,
+      phone: query.phone,
     });
     return this.cartService.removeItem(owner, id);
   }
@@ -162,16 +180,21 @@ export class IntegrationsController {
   @Get('orders')
   @ApiOperation({
     operationId: 'getOrdersByCustomerEmail',
-    summary: 'List orders, optionally for one customer email',
+    summary: 'List one customer’s orders',
     description:
-      'Optional query email. When a customer shares an email, call this API with that email to get their orders, the products on each order, and the status. Omit email to list every order.',
+      'Third-party only. Send email or phone. Returns that customer and their orders. The logged-in shop uses GET /orders and does not send email or phone.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        customer: { id: 'user-uuid', email: 'user@shop.com', first_name: 'Alex', last_name: 'Shopper', phone_number: '9876543210' },
+        orders: [{ id: 'order-uuid', order_number: 'order_13', status: 'order_received', total: 3299, items: [] }],
+      },
+    },
   })
   @ApiScopes('orders:read')
   orders(@Query() query: ListOrdersQuery) {
-    if (query.email?.trim()) {
-      return this.ordersService.findByEmail(query.email);
-    }
-    return this.ordersService.findAll();
+    return this.ordersService.findByCustomer({ email: query.email, phone: query.phone });
   }
 
   @Post('checkout')
@@ -179,12 +202,32 @@ export class IntegrationsController {
     operationId: 'checkoutOrder',
     summary: 'Checkout a customer cart and start Razorpay payment',
     description:
-      'Pass the customer email in the body or as the email query parameter. Creates a pending order from that cart and returns the Razorpay key, amount in paise, and order id. Use key rzp_test_TUonZJyePNzIs5 when the response key is empty. Then call confirmOrderPayment.',
+      'Send email or phone_number, plus the delivery address. The delivery phone does not identify the account. Creates a pending order from that cart and returns the Razorpay key, amount in paise, and order id.',
+  })
+  @ApiBody({
+    type: IntegrationCheckoutDto,
+    examples: {
+      checkout: {
+        summary: 'Checkout payload',
+        value: {
+          email: 'user@shop.com',
+          phone_number: '9876543210',
+          shipping_name: 'Alex Shopper',
+          phone: '9876543210',
+          address: '12 Market Road',
+          city: 'Bengaluru',
+          pincode: '560001',
+        },
+      },
+    },
   })
   @ApiOkResponse({ type: CheckoutSessionDto })
   @ApiScopes('orders:write')
   checkout(@Query() query: CustomerLookupQuery, @Body() body: IntegrationCheckoutDto) {
-    return this.ordersService.checkoutForCustomer(body.email || query.email, body);
+    return this.ordersService.checkoutForCustomer(
+      { email: body.email || query.email, phone: body.phone_number || query.phone },
+      body,
+    );
   }
 
   @Post('orders/confirm')
@@ -192,11 +235,30 @@ export class IntegrationsController {
     operationId: 'confirmOrderPayment',
     summary: 'Finish Razorpay payment and list the customer orders',
     description:
-      'Send order_id and razorpay_payment_id from the Razorpay success handler, plus the customer email. Marks the order paid, clears the cart, and returns every order for that email.',
+      'Send order_id, razorpay_payment_id, and the customer email or phone. Payment is applied only when that order belongs to the customer.',
+  })
+  @ApiBody({
+    type: IntegrationConfirmPaymentDto,
+    examples: {
+      confirm: {
+        summary: 'Confirm payment payload',
+        value: {
+          email: 'user@shop.com',
+          phone_number: '9876543210',
+          order_id: 'order_13',
+          razorpay_payment_id: 'pay_123',
+          razorpay_order_id: 'order_Rz123',
+          razorpay_signature: 'signature',
+        },
+      },
+    },
   })
   @ApiScopes('orders:write')
   confirm(@Query() query: CustomerLookupQuery, @Body() body: IntegrationConfirmPaymentDto) {
-    return this.ordersService.confirmForCustomer(body.email || query.email, body);
+    return this.ordersService.confirmForCustomer(
+      { email: body.email || query.email, phone: body.phone_number || query.phone },
+      body,
+    );
   }
 
   @Get('orders/:id/status')
@@ -204,21 +266,23 @@ export class IntegrationsController {
     operationId: 'getPartnerOrderStatus',
     summary: 'Check an order status and timeline',
     description:
-      'Returns the current status, journey, timeline, tracking, and why cancel, return, or refund is allowed or blocked.',
+      'Send email or phone. Returns the status only when the order belongs to that customer.',
   })
   @ApiScopes('orders:read')
-  orderStatus(@Param('id') id: string) {
-    return this.ordersService.getStatus(id, { role: 'api' });
+  async orderStatus(@Param('id') id: string, @Query() query: CustomerLookupQuery) {
+    await this.ordersService.assertPartnerCustomer(id, query);
+    return this.ordersService.getStatus(id, { role: 'api', allowForce: false });
   }
 
   @Get('orders/:id')
   @ApiOperation({
     operationId: 'getPartnerOrder',
-    summary: 'Get one order with items, timeline, and allowed actions',
+    summary: 'Get one customer order',
+    description: 'Send email or phone. The order id can be the public order number, such as order_13, or the internal id.',
   })
   @ApiScopes('orders:read')
-  order(@Param('id') id: string) {
-    return this.ordersService.getForActor(id, { role: 'api' });
+  order(@Param('id') id: string, @Query() query: CustomerLookupQuery) {
+    return this.ordersService.getForPartner(id, query);
   }
 
   @Post('orders/:id/cancel')
@@ -230,12 +294,13 @@ export class IntegrationsController {
   @ApiBody({
     type: CancelOrderDto,
     examples: {
-      reason: { value: { reason: 'Customer asked to cancel before packing' } },
-      partial: { value: { reason: 'Cancel one unit', items: [{ item_id: 'item-uuid', quantity: 1 }] } },
+      reason: { value: { email: 'user@shop.com', phone: '9876543210', reason: 'Customer asked to cancel before packing' } },
+      partial: { value: { email: 'user@shop.com', reason: 'Cancel one unit', items: [{ item_id: 'item-uuid', quantity: 1 }] } },
     },
   })
   @ApiScopes('orders:write')
-  cancelOrder(@Param('id') id: string, @Body() body: CancelOrderDto, @Req() req) {
+  async cancelOrder(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: CancelOrderDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.cancelOrder(id, body, this.apiActor(req));
   }
 
@@ -247,7 +312,8 @@ export class IntegrationsController {
   })
   @ApiBody({ type: UpdateAddressDto })
   @ApiScopes('orders:write')
-  updateAddress(@Param('id') id: string, @Body() body: UpdateAddressDto, @Req() req) {
+  async updateAddress(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: UpdateAddressDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query));
     return this.ordersService.updateAddress(id, body, this.apiActor(req));
   }
 
@@ -259,7 +325,8 @@ export class IntegrationsController {
   })
   @ApiBody({ type: UpdateRefundStatusDto })
   @ApiScopes('orders:refund')
-  updateRefundStatus(@Param('id') id: string, @Body() body: UpdateRefundStatusDto, @Req() req) {
+  async updateRefundStatus(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: UpdateRefundStatusDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.updateRefundStatus(id, body, this.apiActor(req));
   }
 
@@ -270,7 +337,8 @@ export class IntegrationsController {
   })
   @ApiBody({ type: ReturnOrderDto, examples: { reason: { value: { reason: 'Customer reported damage on delivery' } } } })
   @ApiScopes('orders:write')
-  returnOrder(@Param('id') id: string, @Body() body: ReturnOrderDto, @Req() req) {
+  async returnOrder(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: ReturnOrderDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.requestReturn(id, body, this.apiActor(req));
   }
 
@@ -291,7 +359,8 @@ export class IntegrationsController {
     },
   })
   @ApiScopes('orders:refund')
-  refundOrder(@Param('id') id: string, @Body() body: RefundOrderDto, @Req() req) {
+  async refundOrder(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: RefundOrderDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.refundOrder(id, body, this.apiActor(req));
   }
 
@@ -311,7 +380,8 @@ export class IntegrationsController {
     },
   })
   @ApiScopes('orders:write')
-  updateShipment(@Param('id') id: string, @Body() body: UpdateOrderStatusDto, @Req() req) {
+  async updateShipment(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: UpdateOrderStatusDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.updateFulfillment(id, body, this.apiActor(req));
   }
 
@@ -319,8 +389,17 @@ export class IntegrationsController {
   @ApiOperation({ operationId: 'updatePartnerOrderStatus', summary: 'Update an order status' })
   @ApiBody({ type: UpdateOrderStatusDto })
   @ApiScopes('orders:write')
-  updateOrder(@Param('id') id: string, @Body() body: UpdateOrderStatusDto, @Req() req) {
+  async updateOrder(@Param('id') id: string, @Query() query: CustomerLookupQuery, @Body() body: UpdateOrderStatusDto, @Req() req) {
+    await this.ordersService.assertPartnerCustomer(id, this.lookup(query, body));
     return this.ordersService.updateFulfillment(id, body, this.apiActor(req));
+  }
+
+  private lookup(query?: CustomerLookupQuery, body?: object) {
+    const source = (body || {}) as { email?: string; phone?: string; phone_number?: string };
+    return {
+      email: source.email || query?.email,
+      phone: source.phone || source.phone_number || query?.phone,
+    };
   }
 
   private apiActor(req): { id?: string; role: 'api'; name?: string; allowForce: false } {

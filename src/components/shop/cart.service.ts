@@ -9,6 +9,7 @@ import { Cart } from './entities/cart.entity';
 import { CartItem } from './entities/cart-item.entity';
 import { ProductsService } from './products.service';
 import { User } from '../users/entities/user.entity';
+import { CustomerLookup, findCustomer } from './customer-lookup';
 
 export type CartOwner = { userId?: string; guestToken?: string };
 
@@ -24,19 +25,15 @@ export class CartService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async ownerFromCustomer(input: { guestToken?: string; email?: string }): Promise<CartOwner> {
-    if (input.email) {
-      const user = await this.users
-        .createQueryBuilder('user')
-        .where('LOWER(user.email) = :email', { email: input.email.toLowerCase() })
-        .getOne();
-      if (!user) {
-        throw new NotFoundException('Customer not found');
-      }
+  async ownerFromCustomer(input: { guestToken?: string } & CustomerLookup): Promise<CartOwner> {
+    const email = String(input.email || '').trim();
+    const phone = String(input.phone || '').trim();
+    if (email || phone) {
+      const user = await findCustomer(this.users, { email, phone });
       return { userId: user.id };
     }
     if (!input.guestToken) {
-      throw new BadRequestException('Provide guest_token or email');
+      throw new BadRequestException('Send the customer email, phone number, or a guest_token');
     }
     return { guestToken: input.guestToken };
   }

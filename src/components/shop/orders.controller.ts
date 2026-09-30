@@ -44,7 +44,22 @@ export class OrdersController {
   @ApiOperation({
     operationId: 'checkoutMyCart',
     summary: 'Checkout the logged-in cart and start Razorpay',
-    description: 'Creates a pending order from the signed-in shopper cart. Open Razorpay with the returned key and amount, then call confirm.',
+    description: 'Creates a pending order from the signed-in shopper cart. The login token identifies the customer, so email and phone are not required here.',
+  })
+  @ApiBody({
+    type: CheckoutDto,
+    examples: {
+      checkout: {
+        summary: 'Logged-in checkout payload',
+        value: {
+          shipping_name: 'Alex Shopper',
+          phone: '9876543210',
+          address: '12 Market Road',
+          city: 'Bengaluru',
+          pincode: '560001',
+        },
+      },
+    },
   })
   @ApiOkResponse({ type: CheckoutSessionDto })
   checkout(@Req() req, @Body() body: CheckoutDto) {
@@ -55,7 +70,21 @@ export class OrdersController {
   @ApiOperation({
     operationId: 'confirmMyPayment',
     summary: 'Finish Razorpay payment for the logged-in shopper',
-    description: 'Send the Razorpay success payload. The order becomes order_received and the cart is cleared. The timeline starts with Order placed, then Order received.',
+    description: 'Send the Razorpay success payload for the signed-in shopper. Email and phone are not required.',
+  })
+  @ApiBody({
+    type: ConfirmPaymentDto,
+    examples: {
+      confirm: {
+        summary: 'Logged-in payment confirmation',
+        value: {
+          order_id: 'order_13',
+          razorpay_payment_id: 'pay_123',
+          razorpay_order_id: 'order_Rz123',
+          razorpay_signature: 'signature',
+        },
+      },
+    },
   })
   confirm(@Req() req, @Body() body: ConfirmPaymentDto) {
     return this.ordersService.confirm(req.user.id, body);

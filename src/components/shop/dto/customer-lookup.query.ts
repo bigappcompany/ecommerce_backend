@@ -3,15 +3,23 @@ import { IsOptional, IsString } from 'class-validator';
 
 export class CustomerLookupQuery {
   @ApiPropertyOptional({
-    description:
-      'Customer email. Optional. When a customer shares an email, pass it here. Email is the unique id used to load that customer.',
+    example: 'user@shop.com',
+    description: 'Customer email. Send email or phone. A signed-in shopper does not send this; the login token already identifies them.',
   })
   @IsOptional()
   @IsString()
   email?: string;
 
   @ApiPropertyOptional({
-    description: 'Guest cart id. Optional when email is provided.',
+    example: '9876543210',
+    description: 'Customer account phone. Send email or phone. Required for a third-party call when email is omitted.',
+  })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Guest cart id. Used only for a cart that has no customer yet. An order lookup still needs email or phone.',
   })
   @IsOptional()
   @IsString()

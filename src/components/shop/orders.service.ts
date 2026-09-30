@@ -16,6 +16,7 @@ import { OrderEvent } from './entities/order-event.entity';
 import { CartService } from './cart.service';
 import { Product } from './entities/product.entity';
 import { User } from '../users/entities/user.entity';
+import { CustomerLookup, findCustomer } from './customer-lookup';
 import {
   backfillPlan,
   addressDecision,
@@ -318,20 +319,20 @@ export class OrdersService implements OnModuleInit {
     return this.attachCustomers(orders);
   }
 
-  async checkoutForCustomer(email: string, shipping: any) {
-    const user = await this.customerByEmail(email);
+  async checkoutForCustomer(lookup: CustomerLookup, shipping: any) {
+    const user = await this.customerFromLookup(lookup);
     return this.checkout(user.id, shipping);
   }
 
-  async confirmForCustomer(email: string, body: any) {
-    const user = await this.customerByEmail(email);
+  async confirmForCustomer(lookup: CustomerLookup, body: any) {
+    const user = await this.customerFromLookup(lookup);
     const order = await this.confirm(user.id, body);
-    const listed = await this.findByEmail(email);
+    const listed = await this.findByCustomer(lookup);
     return { paid_order_id: order.id, ...listed };
   }
 
-  async findByEmail(email: string) {
-    const user = await this.customerByEmail(email);
+  async findByCustomer(lookup: CustomerLookup) {
+    const user = await this.customerFromLookup(lookup);
     const orders = await this.orders.find({
       where: { user_id: user.id },
       relations: ['items', 'events'],
@@ -354,24 +355,20 @@ export class OrdersService implements OnModuleInit {
     };
   }
 
-  private async customerByEmail(email: string) {
-    const normalized = String(email || '').trim().toLowerCase();
-    if (!normalized) {
-      throw new BadRequestException('email is required');
-    }
-    const user = await this.users
-      .createQueryBuilder('user')
-      .select([
-        'user.id',
-        'user.email',
-        'user.first_name',
-        'user.last_name',
-        'user.phone_number',
-      ])
-      .where('LOWER(user.email) = :email', { email: normalized })
-      .getOne();
-    if (!user) {
-      throw new NotFoundException('Customer not found');
+  async customerFromLookup(lookup: CustomerLookup) {
+    return findCustomer(this.users, lookup);
+  }
+
+  async getForPartner(id: string, lookup: CustomerLookup) {
+    await this.assertPartnerCustomer(id, lookup);
+    return this.getForActor(id, { role: 'api', allowForce: false });
+  }
+
+  async assertPartnerCustomer(id: string, lookup: CustomerLookup) {
+    const user = await this.customerFromLookup(lookup);
+    const order = await this.loadOrder(id);
+    if (order.user_id !== user.id) {
+      throw new NotFoundException('Order not found');
     }
     return user;
   }

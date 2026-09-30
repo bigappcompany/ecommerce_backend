@@ -28,12 +28,20 @@ export class CheckoutDto {
 
 export class IntegrationCheckoutDto extends CheckoutDto {
   @ApiPropertyOptional({
-    description: 'Customer email. Optional if the email query parameter is set. Email is the unique shopper id.',
+    description: 'Customer email. Send email or phone_number. The delivery phone above is not used to find the account.',
     example: 'user@shop.com',
   })
   @IsOptional()
   @IsString()
   email?: string;
+
+  @ApiPropertyOptional({
+    example: '9876543210',
+    description: 'Customer account phone. Send this when email is omitted.',
+  })
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -63,12 +71,20 @@ export class ConfirmPaymentDto {
 
 export class IntegrationConfirmPaymentDto extends ConfirmPaymentDto {
   @ApiPropertyOptional({
-    description: 'Customer email. Optional if the email query parameter is set.',
+    description: 'Customer email. Send email or phone_number so the payment is applied to that account.',
     example: 'user@shop.com',
   })
   @IsOptional()
   @IsString()
   email?: string;
+
+  @ApiPropertyOptional({
+    example: '9876543210',
+    description: 'Customer account phone. Send this when email is omitted.',
+  })
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
 }
 
 export class CheckoutSessionDto {
@@ -228,12 +244,17 @@ export class UpdateCartQuantityDto {
 }
 
 export class IntegrationCartItemDto {
-  @ApiPropertyOptional({ example: 'user@shop.com' })
+  @ApiPropertyOptional({ example: 'user@shop.com', description: 'Customer email. Send email, phone, or guest_token.' })
   @IsOptional()
   @IsString()
   email?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '9876543210', description: 'Customer account phone. Send this when email is omitted.' })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Guest cart id when the shopper has no account yet.' })
   @IsOptional()
   @IsString()
   guest_token?: string;
@@ -251,12 +272,17 @@ export class IntegrationCartItemDto {
 }
 
 export class IntegrationCartQuantityDto {
-  @ApiPropertyOptional({ example: 'user@shop.com' })
+  @ApiPropertyOptional({ example: 'user@shop.com', description: 'Customer email. Send email, phone, or guest_token.' })
   @IsOptional()
   @IsString()
   email?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '9876543210', description: 'Customer account phone. Send this when email is omitted.' })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Guest cart id when the shopper has no account yet.' })
   @IsOptional()
   @IsString()
   guest_token?: string;
