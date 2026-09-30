@@ -25,7 +25,15 @@ export class ProductsService {
     private readonly products: Repository<Product>,
   ) {}
 
-  async list(query: { search?: string; category?: string; includeInactive?: boolean }) {
+  async list(query: {
+    search?: string;
+    category?: string;
+    includeInactive?: boolean;
+    page?: number;
+    page_size?: number;
+  }) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.page_size) || 10));
     const qb = this.products.createQueryBuilder('product');
     if (!query.includeInactive) {
       qb.where('product.is_active = :active', { active: true });
@@ -35,16 +43,20 @@ export class ProductsService {
     }
     if (query.search?.trim()) {
       qb.andWhere(
-        '(product.name ILIKE :search OR product.description ILIKE :search OR product.sku ILIKE :search)',
+        '(product.name ILIKE :search OR product.description ILIKE :search OR product.sku ILIKE :search OR product.category ILIKE :search)',
         { search: `%${query.search.trim()}%` },
       );
     }
     qb.orderBy('product.created_at', 'DESC');
-    const products = await qb.getMany();
+    const total = await qb.getCount();
+    const products = await qb
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getMany();
     const categories = [
       ...new Set((await this.products.find({ select: ['category'] })).map((p) => p.category)),
     ];
-    return { products, categories };
+    return { products, categories, page, page_size: pageSize, total };
   }
 
   async findOne(id: string) {

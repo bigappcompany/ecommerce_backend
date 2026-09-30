@@ -27,7 +27,7 @@ export class ProductsController {
   @ApiOperation({
     operationId: 'listProducts',
     summary: 'List products',
-    description: 'search and category are optional. Send x-api-key when calling as a partner.',
+    description: 'Returns 10 products from page 1 unless page and page_size are sent. search and category are optional. Send x-api-key when calling as a partner.',
   })
   @ApiSecurity('api-key')
   @UseGuards(OptionalApiKeyGuard)

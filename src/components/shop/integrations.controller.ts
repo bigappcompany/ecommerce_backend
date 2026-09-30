@@ -128,7 +128,7 @@ export class IntegrationsController {
   @ApiOperation({
     operationId: 'listPartnerProducts',
     summary: 'List products',
-    description: 'search and category are optional. No request body.',
+    description: 'Returns 10 products from page 1 unless page and page_size are sent. search and category are optional. No request body.',
   })
   list(@Query() query: ListProductsQuery) {
     return this.productsService.list(query);
